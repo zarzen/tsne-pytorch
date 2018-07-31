@@ -2,6 +2,7 @@ import torch as t
 import numpy as np
 import logging
 
+device = t.device('cuda')
 
 def Hbeta(D, beta=1.0):
     """ pytorch implementation
@@ -31,11 +32,12 @@ def x2p(X, tol=1e-5, perplexity=30.0):
     # Initialize some variables
     (n, d) = X.shape
     sum_X = t.sum(X * X, 1)
-    D = t.add(t.transpose(t.add(-2 * t.dot(X, t.transpose(X, 0, 1)), sum_X)),
-              sum_X)
-    P = t.zeros((n, n))
-    beta = t.ones((n, 1))
-    logU = t.log(perplexity)
+    _tmp1 = t.mm(X, t.transpose(X, 0, 1))
+    _tmp2 = t.add(-2 * _tmp1, sum_X)
+    D = t.add(t.transpose(_tmp2, 0, 1), sum_X)
+    P = t.zeros((n, n)).to(device)
+    beta = t.ones((n, 1)).to(device)
+    logU = np.log(perplexity)
 
     # Loop over all datapoints
     for i in range(n):
@@ -91,7 +93,7 @@ def pca(X, no_dims=50):
     logging.debug("Preprocessing the data using PCA...")
     (n, d) = X.shape
     X = X - t.mean(X, 0).repeat((n, 1))
-    (l, M) = t.eig(t.mm(X.transpose(0, 1), X))
+    (l, M) = t.eig(t.mm(X.transpose(0, 1), X), eigenvectors=True)
     Y = t.mm(X, M[:, 0:no_dims])
     return Y
 
@@ -118,10 +120,10 @@ def tsne(X, no_dims=2, initial_dims=50, perplexity=30.0,
 
     X = pca(X, initial_dims) # not sure whether pytorch has complex number or not
     (n, d) = X.shape
-    Y = t.randn(n, no_dims)
-    dY = t.zeros((n, no_dims))
-    iY = t.zeros((n, no_dims))
-    gains = t.ones((n, no_dims))
+    Y = t.randn(n, no_dims).to(device)
+    dY = t.zeros((n, no_dims)).to(device)
+    iY = t.zeros((n, no_dims)).to(device)
+    gains = t.ones((n, no_dims)).to(device)
 
     # compute P-values
     P = x2p(X, 1e-5, perplexity)
@@ -153,8 +155,8 @@ def tsne(X, no_dims=2, initial_dims=50, perplexity=30.0,
             momentum = initial_momentum
         else:
             momentum = final_momentum
-        gains = (gains + 0.2) * ((dY > 0.) != (iY > 0.)) + \
-                (gains * 0.8) * ((dY > 0.) == (iY > 0.))
+        gains = (gains + 0.2) * ((dY > 0.) != (iY > 0.)).float() + \
+                (gains * 0.8) * ((dY > 0.) == (iY > 0.)).float()
         gains[gains < min_gain] = min_gain
         iY = momentum * iY - eta * (gains * dY)
         Y = Y + iY
@@ -178,10 +180,13 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
     print('test')
     X = np.loadtxt("mnist2500_X.txt")
-    device = t.device('cuda')
-    X = t.tensor(X).to(device)
+
+    X = t.tensor(X, dtype=t.float32).to(device)
     labels = np.loadtxt("mnist2500_labels.txt")
+    import time
+    start_time = time.time()
     Y = tsne(X, 2, 50, 20.0)
+    print("--- %s seconds ---" % (time.time() - start_time))
 
     import pylab
     pylab.scatter(Y[:, 0], Y[:, 1], 20, labels)
